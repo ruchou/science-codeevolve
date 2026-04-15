@@ -154,7 +154,14 @@ def main() -> int:
 
     global_best_sol: GlobalBestProg = GlobalBestProg()
     elapsed_time_offset: float = 0.0
-    cpu_count: int = len(os.sched_getaffinity(0))
+    # macOS portability: os.sched_getaffinity is Linux-only. On Darwin fall
+    # back to os.cpu_count(). Affinity pinning is also gated downstream by
+    # compute_cpu_affinity_sets() / runner.py, so this only affects the
+    # cpu_count value reported in metadata.
+    if hasattr(os, "sched_getaffinity"):
+        cpu_count: int = len(os.sched_getaffinity(0))
+    else:
+        cpu_count: int = os.cpu_count() or 1
     early_stop_counter: int = 0
     global_ckpt: int = 0
     metadata: Optional[Dict[str, Any]] = None
