@@ -14,7 +14,7 @@ import ctypes
 import multiprocessing as mp
 import multiprocessing.sharedctypes as mpsct
 import multiprocessing.synchronize as mps
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from multiprocessing.managers import DictProxy
 from typing import Any, Dict, Optional
 
@@ -40,11 +40,19 @@ class GlobalBestProg:
         eval_metrics: Shared dictionary of evaluation metric names to values.
     """
 
-    fitness: mpsct.Synchronized = mp.Value(ctypes.c_longdouble, float("-inf"), lock=False)
-    iteration_found: mpsct.Synchronized = mp.Value(ctypes.c_int, -1, lock=False)
-    island_found: mpsct.Synchronized = mp.Value(ctypes.c_int, -1, lock=False)
-    depth: mpsct.Synchronized = mp.Value(ctypes.c_int, -1, lock=False)
-    eval_metrics: DictProxy = mp.Manager().dict()
+    fitness: mpsct.Synchronized = field(
+        default_factory=lambda: mp.Value(ctypes.c_longdouble, float("-inf"), lock=False)
+    )
+    iteration_found: mpsct.Synchronized = field(
+        default_factory=lambda: mp.Value(ctypes.c_int, -1, lock=False)
+    )
+    island_found: mpsct.Synchronized = field(
+        default_factory=lambda: mp.Value(ctypes.c_int, -1, lock=False)
+    )
+    depth: mpsct.Synchronized = field(
+        default_factory=lambda: mp.Value(ctypes.c_int, -1, lock=False)
+    )
+    eval_metrics: DictProxy = field(default_factory=lambda: mp.Manager().dict())
 
     def __repr__(self) -> str:
         """Returns a string representation of the global best program.
