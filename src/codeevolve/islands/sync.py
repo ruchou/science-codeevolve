@@ -52,6 +52,13 @@ class GlobalBestProg:
     depth: mpsct.Synchronized = field(
         default_factory=lambda: mp.Value(ctypes.c_int, -1, lock=False)
     )
+    # FIXME(memacc macos-portability): this factory forks a dedicated Manager
+    # *subprocess* per GlobalBestProg instance. Safe only if the dataclass is
+    # instantiated exactly once per run. The original class-body default had
+    # the same leak shape but deferred it past import; moving to a factory
+    # made the leak per-instance instead of per-import. If callers ever
+    # construct multiple GlobalBestProg objects, switch to an explicit shared
+    # Manager created once in main() and passed in.
     eval_metrics: DictProxy = field(default_factory=lambda: mp.Manager().dict())
 
     def __repr__(self) -> str:
