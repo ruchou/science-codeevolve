@@ -154,14 +154,17 @@ def main() -> int:
 
     global_best_sol: GlobalBestProg = GlobalBestProg()
     elapsed_time_offset: float = 0.0
-    # macOS portability: os.sched_getaffinity is Linux-only. On Darwin fall
-    # back to os.cpu_count(). Affinity pinning is also gated downstream by
-    # compute_cpu_affinity_sets() / runner.py, so this only affects the
-    # cpu_count value reported in metadata.
+    # macOS portability: os.sched_getaffinity is Linux-only. On Darwin this
+    # raises AttributeError before the evolution loop starts. Fall back to
+    # os.cpu_count(). This value is informational only on macOS: CPU affinity
+    # pinning is separately gated in compute_cpu_affinity_sets() (cli_setup.py)
+    # which returns no-pinning on non-Linux, so cpu_count here does not control
+    # scheduling — it is stored in run metadata and the checkpoint-change warning.
+    cpu_count: int
     if hasattr(os, "sched_getaffinity"):
-        cpu_count: int = len(os.sched_getaffinity(0))
+        cpu_count = len(os.sched_getaffinity(0))
     else:
-        cpu_count: int = os.cpu_count() or 1
+        cpu_count = os.cpu_count() or 1
     early_stop_counter: int = 0
     global_ckpt: int = 0
     metadata: Optional[Dict[str, Any]] = None
