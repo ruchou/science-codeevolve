@@ -309,3 +309,58 @@ def apply_diff(
     child_code_parts.append(parent_code[last_end:])
 
     return "".join(child_code_parts)
+
+
+# ---------------------------------------------------------------------------
+# M1b multi-file envelope detection and application
+# ---------------------------------------------------------------------------
+
+M1B_ENVELOPE_START = "# EDIT-BLOCK-START"
+M1B_ENVELOPE_END = "# EDIT-BLOCK-END"
+
+
+def is_m1b_envelope(text: str) -> bool:
+    return M1B_ENVELOPE_START in text and M1B_ENVELOPE_END in text
+
+
+def apply_m1b_diff(
+    parent_files: dict[str, str],
+    diff: str,
+    allowed_files: list[str] | None = None,
+) -> dict[str, str]:
+    """Apply M1b multi-file manifest to a dict of file contents.
+
+    Delegates parsing to memacc-llm runner's manifest_parser if available,
+    otherwise does basic parsing inline.
+
+    Returns updated file contents dict.
+    Raises SearchAndReplaceError on validation failure.
+    """
+    try:
+        import sys
+        import os
+        runner_path = os.path.join(os.path.dirname(__file__), "../../../../runner")
+        if runner_path not in sys.path:
+            sys.path.insert(0, os.path.dirname(runner_path))
+        from runner.manifest_parser import parse, validate_regions, WhitelistConfig, ParseError
+    except ImportError:
+        raise SearchAndReplaceError("M1b parser requires memacc-llm runner package")
+
+    config = WhitelistConfig(
+        allowed_files=allowed_files or list(parent_files.keys()),
+        evolve_regions={f: [(1, 999999)] for f in parent_files},
+    )
+
+    result = parse(diff, config)
+    if isinstance(result, ParseError):
+        raise SearchAndReplaceError(f"M1b parse failed: {result.reason}: {result.detail}")
+
+    err = validate_regions(result, parent_files, config)
+    if err is not None:
+        raise SearchAndReplaceError(f"M1b validation failed: {err.reason}: {err.detail}")
+
+    updated = dict(parent_files)
+    for edit in result.edits:
+        updated[edit.file] = updated[edit.file].replace(edit.search, edit.replace, 1)
+
+    return updated

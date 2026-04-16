@@ -433,6 +433,29 @@ async def generate_solution(
         )
         return None, False
 
+    # Check for M1b multi-file envelope
+    from codeevolve.utils.parsing import is_m1b_envelope
+    if is_m1b_envelope(sol_diff):
+        logger.info("Detected M1b multi-file envelope in LLM response")
+        child_sol = Program(
+            id=str(uuid4()),
+            code=sol_diff,
+            language=parent_sol.language,
+            parent_id=parent_sol.id if not gen_init_pop else None,
+            iteration_found=epoch,
+            generation=epoch,
+            island_found=isl_id,
+            prompt_id=prompt.id,
+            inspiration_ids=[ins.id for ins in inspirations],
+            model_id=model_id,
+            model_msg=sol_diff,
+            depth=parent_sol.depth + 1,
+        )
+        child_sol.m1b_manifest = sol_diff
+        # M1b manifests are applied by the adapter-runner, not here.
+        # Store the raw manifest and let the evaluator handle application.
+        return child_sol, True
+
     ## APPLY DIFF
     try:
         logger.info("Attempting to SEARCH/REPLACE on solution...")
