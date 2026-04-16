@@ -121,10 +121,14 @@ class OpenAILM(BaseLM):
             "messages": messages,
             "max_completion_tokens": self.max_tok,
             "user": f"user_{str(uuid4())}",
-            "seed": self.seed,
             "top_p": self.top_p,
             "temperature": self.temp,
         }
+        # Some OpenAI-compat backends (Google AI Studio's Gemini endpoint)
+        # reject unknown fields — including `seed: null`. Only send seed when
+        # explicitly configured.
+        if self.seed is not None:
+            params["seed"] = self.seed
 
         retry_delay: int = 1
         for attempt in range(self.retries + 1):
