@@ -546,10 +546,25 @@ async def evaluate_and_store(
         Boolean indicating whether this child became the new global best solution
     """
     ## EVALUATING CHILD PROGRAM
-    child_sol.returncode, _, child_sol.warning, child_sol.error, child_sol.eval_metrics = evaluator.execute(
-        child_sol, timeout_s=timeout_s
-    )
+    # Adapter-runner entry point (Phase 1b MemAcc-LLM)
+    adapter_evaluator = evolve_config.get("adapter_evaluator")
+    if adapter_evaluator is not None:
+        child_sol.returncode, _, child_sol.warning, child_sol.error, child_sol.eval_metrics = adapter_evaluator(
+            child_sol, timeout_s=timeout_s
+        )
+    else:
+        child_sol.returncode, _, child_sol.warning, child_sol.error, child_sol.eval_metrics = evaluator.execute(
+            child_sol, timeout_s=timeout_s
+        )
     child_sol.fitness = child_sol.eval_metrics.get(evolve_config["fitness_key"], 0)
+
+    # Pre-fitness gate hook (Phase 1b MemAcc-LLM)
+    pre_fitness_gate = evolve_config.get("pre_fitness_gate")
+    if pre_fitness_gate is not None:
+        gate_result = pre_fitness_gate(child_sol, evolve_config, epoch, logger)
+        if gate_result is not None and not gate_result:
+            child_sol.fitness = 0
+            logger.info(f"pre_fitness_gate rejected individual {child_sol.id}: {child_sol.status_code}")
 
     logger.info(f"Child solution -> {child_sol}.")
 
