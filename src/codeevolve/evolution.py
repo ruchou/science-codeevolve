@@ -53,6 +53,40 @@ from codeevolve.utils.parsing import apply_diff
 # ---------------------------------------------------------------------------
 
 
+def install_adapter_evaluator(evolve_config: Dict[str, Any], args: Dict[str, Any]) -> None:
+    """Resolve ADAPTER_EVALUATOR_FACTORY into a callable and install it.
+
+    Fork hook used by MemAcc-LLM (Phase 1b.2a). YAML config sets:
+        EVOLVE_CONFIG:
+          ADAPTER_EVALUATOR_FACTORY: 'memacc_llm.runner.pipeline:build_v1_adapter_evaluator'
+
+    The factory is called once per island with (evolve_config, args) and must
+    return a callable matching the adapter_evaluator contract:
+        (child_sol, timeout_s) -> (returncode, output, warning, error, eval_metrics)
+
+    No-op if ADAPTER_EVALUATOR_FACTORY is absent.
+    """
+    entry = evolve_config.get("ADAPTER_EVALUATOR_FACTORY")
+    if entry is None:
+        return
+
+    if not isinstance(entry, str) or ":" not in entry:
+        raise ValueError(
+            f"ADAPTER_EVALUATOR_FACTORY must be '<module>:<function>', got: {entry!r}"
+        )
+
+    module_name, func_name = entry.split(":", 1)
+    import importlib
+    module = importlib.import_module(module_name)
+    factory = getattr(module, func_name)
+    evaluator = factory(evolve_config, args)
+    if not callable(evaluator):
+        raise TypeError(
+            f"{entry} returned non-callable object: {type(evaluator).__name__}"
+        )
+    evolve_config["adapter_evaluator"] = evaluator
+
+
 def _get_markers(evolve_config: Dict[str, Any]) -> Tuple[str, str, str, str]:
     """Extracts code and prompt block markers from configuration.
 
@@ -1395,6 +1429,7 @@ def setup_codeevolve_components(
     with open(args["cfg_path"], "r") as f:
         config: Dict[str, Any] = yaml.safe_load(f)
     evolve_config: Dict[str, Any] = config["EVOLVE_CONFIG"]
+    install_adapter_evaluator(evolve_config, args)
 
     exploration_ensemble: OpenAIEnsemble
     exploitation_ensemble: OpenAIEnsemble
