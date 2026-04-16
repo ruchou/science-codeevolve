@@ -10,6 +10,7 @@
 #
 # ===--------------------------------------------------------------------------------------===#
 
+import json
 from collections import deque
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -45,8 +46,10 @@ from codeevolve.utils.constants import (
 def format_prog_msg(prog: Program) -> str:
     """Formats a program's execution results into a standardized message string.
 
-    This function creates a formatted message containing the program's code,
-    execution results, and evaluation metrics using a predefined template.
+    Fork extension (MemAcc-LLM Phase 1b.2a): when the program carries L2
+    failure fields (legality_verdict="reject", build_log, verify_log),
+    appends a `# PREVIOUS-ATTEMPT-FEEDBACK` footer so descendant prompts see
+    why the parent was rejected.
 
     Args:
         prog: Program object containing code and execution results.
@@ -60,7 +63,7 @@ def format_prog_msg(prog: Program) -> str:
     if prog.returncode is None:
         raise ValueError("Program must have a returncode in order to format message.")
 
-    return PROG_TEMPLATE.format(
+    base = PROG_TEMPLATE.format(
         language=prog.language,
         code=prog.code,
         eval_metrics=prog.eval_metrics,
@@ -68,6 +71,37 @@ def format_prog_msg(prog: Program) -> str:
         warning=prog.warning,
         error=prog.error,
     )
+    return _append_feedback_footer(prog, base)
+
+
+def _append_feedback_footer(prog: Program, base: str) -> str:
+    """Append a PREVIOUS-ATTEMPT-FEEDBACK footer if any L2 failure log is set."""
+    legality_verdict = getattr(prog, "legality_verdict", None) or ""
+    legality_reasons_raw = getattr(prog, "legality_reasons", None)
+    build_log = getattr(prog, "build_log", None) or ""
+    verify_log = getattr(prog, "verify_log", None) or ""
+
+    reasons: list[str] = []
+    if legality_reasons_raw:
+        try:
+            parsed = json.loads(legality_reasons_raw)
+            if isinstance(parsed, list):
+                reasons = [str(r) for r in parsed]
+            else:
+                reasons = [str(parsed)]
+        except (json.JSONDecodeError, TypeError):
+            reasons = [str(legality_reasons_raw)]
+
+    parts: list[str] = []
+    if legality_verdict == "reject" and reasons:
+        parts.append("LEGALITY-REJECT: " + "; ".join(reasons[:3]))
+    if build_log:
+        parts.append("BUILD-FAIL-LOG:\n" + build_log[:2048])
+    if verify_log:
+        parts.append("VERIFY-FAIL-LOG:\n" + verify_log[:2048])
+    if not parts:
+        return base
+    return base + "\n\n# PREVIOUS-ATTEMPT-FEEDBACK\n" + "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
