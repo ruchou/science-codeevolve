@@ -83,6 +83,16 @@ class Program:
 
     embedding: Optional[List[float]] = None
 
+    # L2 logging fields (Phase 1b MemAcc-LLM)
+    m1b_manifest: Optional[str] = None
+    legality_verdict: Optional[str] = None  # legal / reject / error
+    legality_reasons: Optional[str] = None  # JSON array
+    legality_wall_us: Optional[int] = None
+    build_log: Optional[str] = None
+    verify_log: Optional[str] = None
+    measure_log: Optional[str] = None
+    status_code: Optional[str] = None  # schema_fail / legality_reject / build_fail / etc.
+
     depth: int = 0
 
     def __repr__(self) -> str:

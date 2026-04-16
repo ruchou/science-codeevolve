@@ -523,7 +523,7 @@ async def evaluate_and_store(
         Boolean indicating whether this child became the new global best solution
     """
     ## EVALUATING CHILD PROGRAM
-    child_sol.returncode, _, _, child_sol.error, child_sol.eval_metrics = evaluator.execute(
+    child_sol.returncode, _, child_sol.warning, child_sol.error, child_sol.eval_metrics = evaluator.execute(
         child_sol, timeout_s=timeout_s
     )
     child_sol.fitness = child_sol.eval_metrics.get(evolve_config["fitness_key"], 0)
