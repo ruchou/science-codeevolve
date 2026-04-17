@@ -95,10 +95,13 @@ def _append_feedback_footer(prog: Program, base: str) -> str:
     parts: list[str] = []
     if legality_verdict == "reject" and reasons:
         parts.append("LEGALITY-REJECT: " + "; ".join(reasons[:3]))
+    # Phase 1b.2h: capped to 512 chars each (was 2048) to keep prompts under
+    # Groq's 6K TPM on llama-3.1-8b-instant. The LM needs the key error line,
+    # not the full 2KB log.
     if build_log:
-        parts.append("BUILD-FAIL-LOG:\n" + build_log[:2048])
+        parts.append("BUILD-FAIL-LOG:\n" + build_log[:512])
     if verify_log:
-        parts.append("VERIFY-FAIL-LOG:\n" + verify_log[:2048])
+        parts.append("VERIFY-FAIL-LOG:\n" + verify_log[:512])
     if not parts:
         return base
     return base + "\n\n# PREVIOUS-ATTEMPT-FEEDBACK\n" + "\n\n".join(parts)
