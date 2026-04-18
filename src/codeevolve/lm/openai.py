@@ -119,11 +119,15 @@ class OpenAILM(BaseLM):
         params: Dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
-            "max_completion_tokens": self.max_tok,
-            "user": f"user_{str(uuid4())}",
             "top_p": self.top_p,
             "temperature": self.temp,
         }
+        # max_completion_tokens + user: only send when meaningful. Mistral's
+        # strict validator rejects both as extra_forbidden when null; and
+        # `user` is optional telemetry metadata we never actually use. Same
+        # pattern as `seed` below — opt-in, not default.
+        if self.max_tok is not None:
+            params["max_completion_tokens"] = self.max_tok
         # Some OpenAI-compat backends (Google AI Studio's Gemini endpoint)
         # reject unknown fields — including `seed: null`. Only send seed when
         # explicitly configured.
