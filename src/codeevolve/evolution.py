@@ -1417,6 +1417,21 @@ def _initialize_new_run(
             depth=0,
         )
 
+    # Plan E Task 2 (MemAcc-LLM): when INIT_MANIFEST_FILE is set, override
+    # the epoch-0 candidate so the EA starts from a hand-crafted M1b seed
+    # rather than the pristine baseline. This sidesteps the free-tier
+    # "LM must emit valid M1b on turn 1" bootstrap problem. We set BOTH
+    # `code` (used by callers that print the program) and `m1b_manifest`
+    # (what the adapter-runner evaluator actually applies — see
+    # memacc-llm/runner/pipeline.py _closure which reads
+    # child_sol.m1b_manifest first, then falls back to model_msg).
+    init_manifest_path = config.get("INIT_MANIFEST_FILE")
+    if init_manifest_path:
+        seed_text = Path(init_manifest_path).read_text()
+        init_sol.code = seed_text
+        init_sol.m1b_manifest = seed_text
+        init_sol.model_msg = seed_text
+
     init_sol.returncode, _, _, init_sol.error, init_sol.eval_metrics = evaluator.execute(init_sol)
     if init_sol.returncode == 0:
         init_sol.fitness = init_sol.eval_metrics[evolve_config["fitness_key"]]
