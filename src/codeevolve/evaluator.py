@@ -285,12 +285,11 @@ class Evaluator:
             ) as results_file:
                 result_file_path: str = results_file.name
 
-            # Resolve eval_path against temp_cwd so the subprocess executes the
-            # isolated copy (and sys.path[0] points into it), not the original
-            # source tree. If copytree did not materialize the eval script
-            # inside temp_cwd — e.g. because eval_path lives outside self.cwd,
-            # or because the file wasn't present in self.cwd on disk — we copy
-            # it in explicitly. Without this, every Phase D real-LLM EA child
+            # Resolve eval_path against temp_cwd so the subprocess always executes
+            # an isolated copy inside the sandbox (and sys.path[0] points into it),
+            # not the original source tree. All four cases (abs-inside-cwd,
+            # abs-outside-cwd, relative-present, relative-missing) consistently
+            # land inside temp_cwd. Without this, every Phase D real-LLM EA child
             # exited with rc=2 / "evaluate.py not found" before fitness was
             # computed.
             effective_eval_path: Path = self.eval_path
@@ -300,13 +299,14 @@ class Evaluator:
                         rel = self.eval_path.relative_to(self.cwd)
                     else:
                         rel = self.eval_path
-                    effective_eval_path = temp_cwd / rel
                 except ValueError:
-                    # eval_path is absolute and not under self.cwd. Keep it in
-                    # place at its original absolute location — we'll still
-                    # verify it exists below.
-                    effective_eval_path = self.eval_path
+                    # eval_path is absolute but outside self.cwd; land it at
+                    # temp_cwd root under its basename.
+                    rel = Path(self.eval_path.name)
+                effective_eval_path = temp_cwd / rel
 
+                # temp_cwd is a fresh per-candidate tempdir; no concurrent writer,
+                # so the exists-then-copy sequence is race-free by construction.
                 if not effective_eval_path.exists():
                     source: Path = (
                         self.eval_path

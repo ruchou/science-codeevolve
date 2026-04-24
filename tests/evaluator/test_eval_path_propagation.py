@@ -59,12 +59,12 @@ def test_eval_script_outside_cwd_is_propagated_into_temp_cwd(tmp_path: Path) -> 
     """Absolute eval_path living *outside* cwd.
 
     ``copytree(self.cwd, temp_cwd)`` does NOT copy files outside self.cwd.
-    Before the fix, the subprocess still launches the original absolute path
-    — which happens to work *until* the script or its siblings reference
-    cwd-relative helpers. After the fix, we either launch the original
-    absolute path (it still exists and is readable) or a copy inside
-    temp_cwd; either way the subprocess must successfully execute and
-    write combined_score.
+    Under the current contract, the Evaluator always propagates the eval
+    script into temp_cwd (landing it at ``temp_cwd / <basename>`` when the
+    original lives outside self.cwd), so the subprocess executes the
+    sandbox copy rather than the out-of-tree original. The observable
+    behavior: no FileNotFoundError, clean returncode, combined_score
+    written.
     """
     cwd = tmp_path / "src_root"
     cwd.mkdir()
@@ -82,6 +82,7 @@ def test_eval_script_outside_cwd_is_propagated_into_temp_cwd(tmp_path: Path) -> 
         resource_check_interval_s=None,
     )
     returncode, _, _, error, eval_metrics = ev.execute(_make_program())
+    assert error is None, f"expected no error, got {error!r}"
     assert returncode == 0, f"expected clean run, got rc={returncode} err={error!r}"
     assert eval_metrics.get("combined_score") == 1.0
 
@@ -117,6 +118,35 @@ def test_eval_script_relative_but_missing_from_cwd_raises_cleanly(tmp_path: Path
     assert error is not None, "missing eval script must surface a diagnostic"
     # Require the explicit pre-launch FileNotFoundError signal. The bare rc=2
     # path produces "can't open file" instead — that's the bug this guards.
+    assert "Evaluator script not found" in error, (
+        f"expected pre-launch FileNotFoundError diagnostic, got: {error!r}"
+    )
+
+
+def test_eval_script_absolute_but_missing_raises_cleanly(tmp_path: Path) -> None:
+    """Absolute eval_path that does not exist on disk.
+
+    Symmetric with ``test_eval_script_relative_but_missing_from_cwd_raises_cleanly``
+    but with an absolute path outside self.cwd. The Evaluator must raise
+    FileNotFoundError (surfaced via EvaluationError) BEFORE launching the
+    subprocess, rather than silently passing a bogus path to python.
+    """
+    cwd = tmp_path / "src_root"
+    cwd.mkdir()
+    # Deliberately do NOT create this file.
+    missing_eval = tmp_path / "nowhere" / "evaluate.py"
+
+    ev = Evaluator(
+        eval_path=missing_eval,
+        cwd=cwd,
+        timeout_s=30,
+        max_mem_b=None,
+        resource_check_interval_s=None,
+    )
+    returncode, _, _, error, _eval_metrics = ev.execute(_make_program())
+
+    assert returncode != 0, "missing eval script must not be a silent success"
+    assert error is not None, "missing eval script must surface a diagnostic"
     assert "Evaluator script not found" in error, (
         f"expected pre-launch FileNotFoundError diagnostic, got: {error!r}"
     )
