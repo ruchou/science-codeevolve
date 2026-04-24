@@ -12,9 +12,10 @@
 # ===--------------------------------------------------------------------------------------===#
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import numpy as np
@@ -1564,3 +1565,89 @@ async def codeevolve(
         components.timeout_scheduler,
         components.logger,
     )
+
+
+# ---------------------------------------------------------------------------
+# READ-FILE dispatcher (Plan B T2)
+# ---------------------------------------------------------------------------
+
+from codeevolve.utils.read_file_safe import ReadFileError, read_file_safe  # noqa: E402
+
+MAX_READ_FILE_CALLS = 3
+_READ_FILE_RE = re.compile(r"^\s*READ-FILE:\s*(\S+)\s*$")
+
+
+@dataclass
+class _ReadFileDispatchResult:
+    """Result of a READ-FILE-aware generate call: the final non-READ-FILE
+    content plus bookkeeping (reads_used, accumulated tokens, model_id).
+    """
+
+    content: str
+    reads_used: int
+    model_id: int
+    prompt_tok: int
+    compl_tok: int
+
+
+async def read_file_dispatch(
+    *,
+    call: Callable[[List[dict]], Awaitable[tuple]],
+    messages: List[dict],
+    allowed_roots: List[Path],
+    max_reads: int = MAX_READ_FILE_CALLS,
+) -> _ReadFileDispatchResult:
+    """Run ``call(messages) -> (model_id, content, prompt_tok, compl_tok)``
+    with a READ-FILE interception loop.
+
+    If ``content`` matches ``^READ-FILE: <path>$``, resolve the file via
+    ``read_file_safe``, append a user-role message with the content, and
+    re-call. Cap at ``max_reads``.
+
+    When the cap is reached or the LM emits a non-READ-FILE response, return
+    the final content plus accumulated token usage. On a ``ReadFileError``
+    (file not found, path escape, too large), append the error as a user
+    message and continue (counts against the cap).
+    """
+    reads_used = 0
+    tokens_prompt = 0
+    tokens_compl = 0
+    final_model_id = 0
+    current_messages = list(messages)
+
+    while True:
+        model_id, content, p_tok, c_tok = await call(current_messages)
+        final_model_id = model_id
+        tokens_prompt += int(p_tok or 0)
+        tokens_compl += int(c_tok or 0)
+
+        m = _READ_FILE_RE.match(content)
+        if not m or reads_used >= max_reads:
+            return _ReadFileDispatchResult(
+                content=content,
+                reads_used=reads_used,
+                model_id=final_model_id,
+                prompt_tok=tokens_prompt,
+                compl_tok=tokens_compl,
+            )
+
+        path = m.group(1)
+        try:
+            body = read_file_safe(
+                rel_path=path,
+                allowed_roots=allowed_roots,
+            )
+            feedback = f"Here is {path}:\n\n```\n{body}\n```"
+        except ReadFileError as e:
+            feedback = (
+                f"READ_FILE_ERROR: {e}\n\n"
+                f"The path {path!r} could not be read. "
+                "Pick a valid path from the context_files list, or emit "
+                "your M1b manifest now."
+            )
+
+        current_messages = current_messages + [
+            {"role": "assistant", "content": content},
+            {"role": "user", "content": feedback},
+        ]
+        reads_used += 1
