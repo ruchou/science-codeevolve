@@ -79,6 +79,18 @@ def save_ckpt(
     with open(best_prompt_path, "w") as f:
         f.write(prompt_db.programs[prompt_db.best_prog_id].code)
 
+    # Persist the winning candidate's M1b manifest alongside best_sol so
+    # post-run tools (materialize_best_candidate) can replay the edit set.
+    best_prog = sol_db.programs[sol_db.best_prog_id]
+    best_manifest = getattr(best_prog, "m1b_manifest", None)
+    if best_manifest:
+        manifest_sibling = best_sol_path.with_suffix(
+            best_sol_path.suffix + ".m1b_manifest.txt"
+        )
+        with open(manifest_sibling, "w") as f:
+            f.write(best_manifest)
+        logger.info(f"Saved best manifest at '{manifest_sibling}'.")
+
     logger.info(f"Saved best solution at '{best_sol_path}'.")
     logger.info(f"Saved best prompt at '{best_prompt_path}'.")
     logger.info(f"Checkpoint {curr_epoch} successfully saved.")
