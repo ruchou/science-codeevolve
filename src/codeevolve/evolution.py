@@ -472,39 +472,119 @@ async def generate_solution(
 
     ## GENERATE DIFF (with READ-FILE dispatch, Plan B T3)
     read_file_roots = _resolve_read_file_roots(evolve_config)
-    try:
-        async def _call(msgs):
-            return await ensemble.generate(messages=msgs)
+    # Plan E Task 7 (spec §13): when FORK1_ENABLED is set, delegate to the
+    # per-candidate ReAct agent in runner.fork1_agent instead of the 2-state
+    # READ-FILE dispatcher. Preserves all downstream code paths — the agent
+    # returns an M1b manifest string which flows into the same Program
+    # wrapping logic used by the 2-state path.
+    fork1_enabled = bool(evolve_config.get("FORK1_ENABLED"))
+    if fork1_enabled:
+        try:
+            # runner is on sys.path in the EA subprocess (ea_launcher's
+            # bootstrap pre-imports runner.driver); fail loudly if not.
+            from runner.fork1_agent import run_agent_loop
 
-        disp = await read_file_dispatch(
-            call=_call,
-            messages=messages,
-            allowed_roots=read_file_roots,
-        )
-        model_id = disp.model_id
-        sol_diff = disp.content
-        prompt_tok = disp.prompt_tok
-        compl_tok = disp.compl_tok
-        evolve_state["tok_usage"].append(
-            {
-                "epoch": epoch,
-                "motive": "generate_prog",
-                "prompt_tok": prompt_tok,
-                "compl_tok": compl_tok,
-                "model_name": ensemble.models[model_id].model_name,
-                "read_file_reads": disp.reads_used,
-            }
-        )
-    except Exception as err:
-        logger.error(f"Error when generating program on LM: {str(err)}.")
-        evolve_state["errors"].append(
-            {
-                "epoch": epoch,
-                "motive": "generate_prog",
-                "error_msg": str(err),
-            }
-        )
-        return None, False
+            # Adapt ensemble.generate → (model_id, resp, p, c) to the
+            # 3-tuple (resp, p, c) shape that run_agent_loop expects.
+            _picked_model_id: List[int] = [0]
+
+            class _EnsembleLMAdapter:
+                async def generate(self, msgs):
+                    m_id, resp, p_tok, c_tok = await ensemble.generate(
+                        messages=msgs
+                    )
+                    _picked_model_id[0] = m_id
+                    return resp, p_tok, c_tok
+
+            # Flatten messages into a single initial_prompt for the agent.
+            # run_agent_loop owns its own multi-turn message state after
+            # that; the prompt-sampler's chat history is the seed context.
+            initial_prompt = "\n\n".join(
+                f"[{m.get('role', 'user')}]\n{m.get('content', '')}"
+                for m in messages
+            )
+            result = await run_agent_loop(
+                lm=_EnsembleLMAdapter(),
+                initial_prompt=initial_prompt,
+                allowed_roots=read_file_roots,
+                legality_checker=None,  # MVP: skip mid-loop legality probe
+                max_steps=int(evolve_config.get("FORK1_MAX_STEPS", 8)),
+            )
+            model_id = _picked_model_id[0]
+            sol_diff = result.manifest_text or ""
+            prompt_tok = result.tokens_used  # aggregate; split unavailable
+            compl_tok = 0
+            evolve_state["tok_usage"].append(
+                {
+                    "epoch": epoch,
+                    "motive": "generate_prog_fork1",
+                    "prompt_tok": prompt_tok,
+                    "compl_tok": compl_tok,
+                    "model_name": ensemble.models[model_id].model_name,
+                    "fork1_steps": result.steps_used,
+                    "fork1_reason": result.reason,
+                }
+            )
+            if result.manifest_text is None:
+                logger.error(
+                    f"Fork1 agent loop exhausted without manifest: "
+                    f"reason={result.reason} steps={result.steps_used}"
+                )
+                evolve_state["errors"].append(
+                    {
+                        "epoch": epoch,
+                        "motive": "generate_prog_fork1",
+                        "error_msg": (
+                            f"fork1_no_manifest reason={result.reason} "
+                            f"steps={result.steps_used}"
+                        ),
+                    }
+                )
+                return None, False
+        except Exception as err:
+            logger.error(f"Error in Fork1 agent loop: {str(err)}.")
+            evolve_state["errors"].append(
+                {
+                    "epoch": epoch,
+                    "motive": "generate_prog_fork1",
+                    "error_msg": str(err),
+                }
+            )
+            return None, False
+    else:
+        try:
+            async def _call(msgs):
+                return await ensemble.generate(messages=msgs)
+
+            disp = await read_file_dispatch(
+                call=_call,
+                messages=messages,
+                allowed_roots=read_file_roots,
+            )
+            model_id = disp.model_id
+            sol_diff = disp.content
+            prompt_tok = disp.prompt_tok
+            compl_tok = disp.compl_tok
+            evolve_state["tok_usage"].append(
+                {
+                    "epoch": epoch,
+                    "motive": "generate_prog",
+                    "prompt_tok": prompt_tok,
+                    "compl_tok": compl_tok,
+                    "model_name": ensemble.models[model_id].model_name,
+                    "read_file_reads": disp.reads_used,
+                }
+            )
+        except Exception as err:
+            logger.error(f"Error when generating program on LM: {str(err)}.")
+            evolve_state["errors"].append(
+                {
+                    "epoch": epoch,
+                    "motive": "generate_prog",
+                    "error_msg": str(err),
+                }
+            )
+            return None, False
 
     # Check for M1b multi-file envelope
     from codeevolve.utils.parsing import is_m1b_envelope
