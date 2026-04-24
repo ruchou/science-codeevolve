@@ -20,6 +20,7 @@ from codeevolve.lm.openai import (
     OpenAILM,
     _create_lm_from_config,
 )
+from codeevolve.prompt.context_files_bundle import render_context_files_section
 from codeevolve.prompt.template import (
     EVOLVE_PROG_TEMPLATE,
     EVOLVE_PROMPT_TEMPLATE,
@@ -233,6 +234,7 @@ class PromptSampler:
         max_chat_depth: Optional[int] = None,
         exploitation: bool = False,
         eval_budget: Optional[str] = None,
+        adapter_yaml: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """Builds a conversation prompt from program lineage and inspirations.
 
@@ -287,6 +289,13 @@ class PromptSampler:
         sys_content: str = prompt.code
         if eval_budget:
             sys_content += "\n" + eval_budget
+        # Plan B T4: inject context_files section when adapter declares them
+        if adapter_yaml is not None:
+            bundle = render_context_files_section(
+                context_files=adapter_yaml.get("context_files") or []
+            )
+            if bundle:
+                sys_content += bundle
         messages.appendleft({"role": "system", "content": sys_content})
 
         task_template: str

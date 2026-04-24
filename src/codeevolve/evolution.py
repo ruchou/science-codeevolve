@@ -466,6 +466,7 @@ async def generate_solution(
         max_chat_depth=chat_depth,
         exploitation=exploitation,
         eval_budget=eval_budget,
+        adapter_yaml=evolve_config.get("adapter_yaml"),  # Plan B T4
     )
     logger.info(f"Chat consists of {len(messages)} messages (max_chat_depth = {chat_depth}).")
 
