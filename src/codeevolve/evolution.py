@@ -106,6 +106,30 @@ def _get_markers(evolve_config: Dict[str, Any]) -> Tuple[str, str, str, str]:
     )
 
 
+def _resolve_read_file_roots(evolve_config: Dict[str, Any]) -> list:
+    """Pull benchmark_root out of the evolve_config if set by the adapter
+    hook. When no adapter is installed (pure upstream CodeEvolve), return
+    an empty list so READ-FILE requests always hit "outside allowed roots"
+    errors — deliberately disabled for upstream runs.
+
+    Looks for two keys the Plan B adapter hook sets:
+      - `adapter_yaml`: parsed adapter dict; if present, its `benchmark_root`
+        field (from the onboarding agent) is used as one root.
+      - `stripped_root`: absolute path to the stripped baseline tree; used as
+        a second root so the stripped tree is also reachable.
+    """
+    from pathlib import Path as _Path
+    adapter_yaml = evolve_config.get("adapter_yaml") or {}
+    roots = []
+    br = adapter_yaml.get("benchmark_root")
+    if br:
+        roots.append(_Path(br))
+    sr = evolve_config.get("stripped_root")
+    if sr:
+        roots.append(_Path(sr))
+    return roots
+
+
 # ---------------------------------------------------------------------------
 # Evolutionary loop functions
 # ---------------------------------------------------------------------------
@@ -445,9 +469,21 @@ async def generate_solution(
     )
     logger.info(f"Chat consists of {len(messages)} messages (max_chat_depth = {chat_depth}).")
 
-    ## GENERATE DIFF
+    ## GENERATE DIFF (with READ-FILE dispatch, Plan B T3)
+    read_file_roots = _resolve_read_file_roots(evolve_config)
     try:
-        model_id, sol_diff, prompt_tok, compl_tok = await ensemble.generate(messages=messages)
+        async def _call(msgs):
+            return await ensemble.generate(messages=msgs)
+
+        disp = await read_file_dispatch(
+            call=_call,
+            messages=messages,
+            allowed_roots=read_file_roots,
+        )
+        model_id = disp.model_id
+        sol_diff = disp.content
+        prompt_tok = disp.prompt_tok
+        compl_tok = disp.compl_tok
         evolve_state["tok_usage"].append(
             {
                 "epoch": epoch,
@@ -455,6 +491,7 @@ async def generate_solution(
                 "prompt_tok": prompt_tok,
                 "compl_tok": compl_tok,
                 "model_name": ensemble.models[model_id].model_name,
+                "read_file_reads": disp.reads_used,
             }
         )
     except Exception as err:
