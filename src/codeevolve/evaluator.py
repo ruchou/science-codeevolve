@@ -285,14 +285,42 @@ class Evaluator:
             ) as results_file:
                 result_file_path: str = results_file.name
 
-            # resolve eval_path against temp_cwd when absolute so that sys.path[0]
-            # inside the subprocess points to the isolated copy, not the original cwd.
+            # Resolve eval_path against temp_cwd so the subprocess executes the
+            # isolated copy (and sys.path[0] points into it), not the original
+            # source tree. If copytree did not materialize the eval script
+            # inside temp_cwd — e.g. because eval_path lives outside self.cwd,
+            # or because the file wasn't present in self.cwd on disk — we copy
+            # it in explicitly. Without this, every Phase D real-LLM EA child
+            # exited with rc=2 / "evaluate.py not found" before fitness was
+            # computed.
             effective_eval_path: Path = self.eval_path
-            if temp_cwd is not None and self.eval_path.is_absolute() and self.cwd is not None:
+            if temp_cwd is not None and self.cwd is not None:
                 try:
-                    effective_eval_path = temp_cwd / self.eval_path.relative_to(self.cwd)
+                    if self.eval_path.is_absolute():
+                        rel = self.eval_path.relative_to(self.cwd)
+                    else:
+                        rel = self.eval_path
+                    effective_eval_path = temp_cwd / rel
                 except ValueError:
-                    pass
+                    # eval_path is absolute and not under self.cwd. Keep it in
+                    # place at its original absolute location — we'll still
+                    # verify it exists below.
+                    effective_eval_path = self.eval_path
+
+                if not effective_eval_path.exists():
+                    source: Path = (
+                        self.eval_path
+                        if self.eval_path.is_absolute()
+                        else (self.cwd / self.eval_path)
+                    )
+                    if source.exists():
+                        effective_eval_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source, effective_eval_path)
+                    else:
+                        raise FileNotFoundError(
+                            f"Evaluator script not found at {source}; "
+                            f"cannot propagate into {temp_cwd}"
+                        )
 
             # launch evaluation subprocess
             process = subprocess.Popen(
