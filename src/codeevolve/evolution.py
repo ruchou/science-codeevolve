@@ -1420,15 +1420,21 @@ def _initialize_new_run(
     # Plan E Task 2 (MemAcc-LLM): when INIT_MANIFEST_FILE is set, override
     # the epoch-0 candidate so the EA starts from a hand-crafted M1b seed
     # rather than the pristine baseline. This sidesteps the free-tier
-    # "LM must emit valid M1b on turn 1" bootstrap problem. We set BOTH
-    # `code` (used by callers that print the program) and `m1b_manifest`
-    # (what the adapter-runner evaluator actually applies — see
-    # memacc-llm/runner/pipeline.py _closure which reads
-    # child_sol.m1b_manifest first, then falls back to model_msg).
+    # "LM must emit valid M1b on turn 1" bootstrap problem.
+    #
+    # Leave `init_sol.code` as the pristine baseline; override only
+    # `.m1b_manifest` and `.model_msg`. The evaluator applies
+    # `.m1b_manifest` against `.code` via `pipeline._closure` (which reads
+    # `child_sol.m1b_manifest` first, then falls back to `model_msg`).
+    #
+    # Why NOT override `.code`: (1) `format_prog_msg` templates `prog.code`
+    # into `PROG_TEMPLATE`, so LM prompts would show the manifest envelope
+    # where a source file should appear. (2) `apply_diff` uses
+    # `parent_sol.code` as the SEARCH/REPLACE target, so children
+    # descending from init_sol would fail to apply against envelope text.
     init_manifest_path = config.get("INIT_MANIFEST_FILE")
     if init_manifest_path:
         seed_text = Path(init_manifest_path).read_text()
-        init_sol.code = seed_text
         init_sol.m1b_manifest = seed_text
         init_sol.model_msg = seed_text
 
