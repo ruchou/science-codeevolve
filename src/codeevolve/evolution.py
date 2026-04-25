@@ -575,6 +575,27 @@ async def generate_solution(
                     "read_file_reads": disp.reads_used,
                 }
             )
+            # Plan G Task 1: spec §19 read-count instrumentation. Optional —
+            # only fires when evolve_config["READ_FILE_COUNTER_LOG"] is set.
+            # Wrapped in try/except: instrumentation must never fail a
+            # candidate evaluation. NOTE: covers the 2-state dispatcher only;
+            # Fork 1 (FORK1_ENABLED) is intentionally not instrumented in this
+            # task because run_agent_loop returns steps_used (READ + LEGALITY
+            # + MANIFEST), not a clean read-count — instrumenting it would
+            # overcount and corrupt the §19 average.
+            counter_log = evolve_config.get("READ_FILE_COUNTER_LOG")
+            if counter_log:
+                try:
+                    from runner.read_file_counter import ReadFileCounter
+                    c = ReadFileCounter(counter_log)
+                    c.record(
+                        island_id=isl_id,
+                        iteration=epoch,
+                        reads_used=disp.reads_used,
+                    )
+                    c.flush()
+                except Exception:
+                    pass
         except Exception as err:
             logger.error(f"Error when generating program on LM: {str(err)}.")
             evolve_state["errors"].append(
