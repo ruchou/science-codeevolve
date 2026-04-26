@@ -130,6 +130,38 @@ def _resolve_read_file_roots(evolve_config: Dict[str, Any]) -> list:
     return roots
 
 
+def _resolve_read_file_allowlist(evolve_config: Dict[str, Any]) -> list[str] | None:
+    """Spec §9: `allowed_read_paths = context_files ∪ evolvable_files.path ∪
+    datalayout_api_headers.*.path`.
+
+    Returns the spec-accurate allow-list of relative paths the model is
+    permitted to READ-FILE. When the adapter is missing (e.g. upstream
+    CodeEvolve smoke tests with no onboarding hook), returns None so the
+    legacy root-only behavior applies — that path is already locked down
+    by `_resolve_read_file_roots` returning an empty list, which makes
+    every read fail safely.
+
+    `datalayout_api_headers` entries can be dicts (`{path:..., summary:...}`)
+    or bare strings; both shapes are flattened.
+    """
+    adapter_yaml = evolve_config.get("adapter_yaml") or {}
+    if not adapter_yaml:
+        return None
+    paths: set[str] = set()
+    for cf in adapter_yaml.get("context_files") or []:
+        if isinstance(cf, str):
+            paths.add(cf)
+    for ef in adapter_yaml.get("evolvable_files") or []:
+        if isinstance(ef, dict) and isinstance(ef.get("path"), str):
+            paths.add(ef["path"])
+    for h in adapter_yaml.get("datalayout_api_headers") or []:
+        if isinstance(h, str):
+            paths.add(h)
+        elif isinstance(h, dict) and isinstance(h.get("path"), str):
+            paths.add(h["path"])
+    return sorted(paths)
+
+
 # ---------------------------------------------------------------------------
 # Evolutionary loop functions
 # ---------------------------------------------------------------------------
@@ -472,6 +504,7 @@ async def generate_solution(
 
     ## GENERATE DIFF (with READ-FILE dispatch, Plan B T3)
     read_file_roots = _resolve_read_file_roots(evolve_config)
+    read_file_allowlist = _resolve_read_file_allowlist(evolve_config)
     # Plan E Task 7 (spec §13): when FORK1_ENABLED is set, delegate to the
     # per-candidate ReAct agent in runner.fork1_agent instead of the 2-state
     # READ-FILE dispatcher. Preserves all downstream code paths — the agent
@@ -560,6 +593,7 @@ async def generate_solution(
                 call=_call,
                 messages=messages,
                 allowed_roots=read_file_roots,
+                allowed_relpaths=read_file_allowlist,
             )
             model_id = disp.model_id
             sol_diff = disp.content
@@ -1756,6 +1790,7 @@ async def read_file_dispatch(
     messages: List[dict],
     allowed_roots: List[Path],
     max_reads: int = MAX_READ_FILE_CALLS,
+    allowed_relpaths: List[str] | None = None,
 ) -> _ReadFileDispatchResult:
     """Run ``call(messages) -> (model_id, content, prompt_tok, compl_tok)``
     with a READ-FILE interception loop.
@@ -1796,6 +1831,7 @@ async def read_file_dispatch(
             body = read_file_safe(
                 rel_path=path,
                 allowed_roots=allowed_roots,
+                allowed_relpaths=allowed_relpaths,
             )
             feedback = f"Here is {path}:\n\n```\n{body}\n```"
         except ReadFileError as e:

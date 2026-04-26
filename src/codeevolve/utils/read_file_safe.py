@@ -20,13 +20,27 @@ def read_file_safe(
     rel_path: str,
     allowed_roots: list[Path],
     max_bytes: int = DEFAULT_MAX_BYTES,
+    allowed_relpaths: list[str] | None = None,
 ) -> str:
     """Return `rel_path`'s content from the first allowed root that contains it.
 
     Safety: `Path.resolve()` the candidate and compare against each root's
     resolved form — guarantees no `../..` or absolute-path escape even
     through symlinks.
+
+    Spec §9 allow-list: when `allowed_relpaths` is provided (non-None), the
+    requested path must match one of those entries verbatim. This implements
+    the `allowed_read_paths = context_files ∪ evolvable_files ∪
+    datalayout_api_headers` constraint and prevents the model from reading
+    arbitrary files that merely happen to live under benchmark_root. When
+    `allowed_relpaths` is None, the legacy root-only check applies (kept for
+    Fork-1 / direct callers that haven't been migrated yet).
     """
+    if allowed_relpaths is not None and rel_path not in set(allowed_relpaths):
+        raise ReadFileError(
+            f"{rel_path}: not in declared READ-FILE allow-list "
+            f"(context_files ∪ evolvable_files ∪ datalayout_api_headers)"
+        )
     for root in allowed_roots:
         root_resolved = Path(root).resolve()
         candidate = (Path(root) / rel_path).resolve()
