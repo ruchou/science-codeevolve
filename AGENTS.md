@@ -18,17 +18,28 @@ src/codeevolve/
   scheduler.py      # Exploration rate schedulers
   lm/               # LLM interfaces (base.py, openai.py)
   islands/          # Topology (graph.py), sync (sync.py), migration (migration.py)
-  prompt/           # Prompt templates (template.py), conversation builder (sampler.py)
-  utils/            # Constants, checkpointing, config, diff parsing, logging, locking
-tests/              # pytest suite mirroring src/ structure
-configs/            # Example YAML configs (mock, qwen, gemini)
-problems/           # Benchmark problems and problem_template
+  prompt/           # Templates (template.py), conversation builder (sampler.py),
+                    # multi-file context bundling (context_files_bundle.py)
+  utils/            # ckpt.py, cli_setup.py, constants.py, lock.py, logging.py,
+                    # parsing.py (diff/marker parsing), read_file_safe.py
+tests/              # pytest suite, mostly flat (test_<module>.py) with nested
+                    # subpackages: evaluator/, evolution/, utils/
+configs/
+  templates/        # Example YAML configs: config_mock.yaml, config_qwen.yaml,
+                    # config_gemini.yaml (copy + edit, do not run from templates/)
+problems/
+  alphaevolve_math_problems/   # AlphaEvolve-style math benchmarks
+  eoh-problems/                # EoH benchmark suite
+  templates/python/            # Per-problem scaffold (replaces old "problem_template")
+scripts/            # run.sh, run_mock.sh — convenience launchers
+assets/             # Static assets (images, etc.)
 ```
 
 ## Build & Test
 
-- **Python**: >=3.13.5, managed via conda (`environment.yml`)
+- **Python**: `pyproject.toml` declares `>=3.12`; `environment.yml` pins `python=3.13`
 - **Install**: `conda env create -f environment.yml && conda activate codeevolve`
+  (the env auto-installs `-e .[dev,benchmarks]`, so pytest and benchmark deps come along)
 - **Run tests**: `pytest tests/` (use `pytest tests/ -v` for verbose)
 - **Formatting**: `black` (line-length 100, target py313) and `isort` (profile "black")
 - **Async tests**: use `@pytest.mark.asyncio` decorator; pytest-asyncio is configured in strict mode
@@ -68,7 +79,7 @@ The `Evaluator` class runs programs via subprocess with timeout and optional mem
 
 ### Mock Models
 
-Set `model_name` to `"MOCK"` in config to use `MockOpenAILM` for testing without API calls. The mock returns identity SEARCH/REPLACE diffs.
+Set `model_name` to any string starting with `"MOCK"` (case-insensitive prefix match against `MOCK_MODEL_PREFIX`) to use `MockOpenAILM` for testing without API calls. The mock returns identity SEARCH/REPLACE diffs.
 
 ## Testing Guidelines
 
