@@ -153,6 +153,55 @@ class OpenAILM(BaseLM):
                         )
                     )
 
+    async def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """OpenAI-compat chat completion that returns the raw provider response.
+
+        Used by the agent onboarder transports to access tool_calls and the
+        full response structure that generate() collapses to (text, in_tok, out_tok).
+
+        Args:
+            messages: Chat messages in OpenAI format.
+            tools: Optional list of tool/function declarations in the
+                   OpenAI tools format. Omitted from the API call when None.
+
+        Returns:
+            The provider response as a dict (response.model_dump()).
+
+        Raises:
+            ConnectionError: If all retry attempts fail.
+        """
+        params: Dict[str, Any] = {
+            "model": self.model_name,
+            "messages": messages,
+            "top_p": self.top_p,
+            "temperature": self.temp,
+        }
+        if self.max_tok is not None:
+            params["max_completion_tokens"] = self.max_tok
+        if self.seed is not None:
+            params["seed"] = self.seed
+        if tools is not None:
+            params["tools"] = tools
+
+        retry_delay: int = 1
+        for attempt in range(self.retries + 1):
+            try:
+                ret = await self.client.chat.completions.create(**params)
+                return ret.model_dump()
+            except Exception as err:
+                if attempt < self.retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = retry_delay << 1
+                else:
+                    raise ConnectionError(
+                        f"Failed to fetch LM response after {self.retries+1} attempts"
+                        f" (Error: {str(err)})."
+                    )
+
 
 @dataclass
 class MockOpenAILM(BaseLM):
