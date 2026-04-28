@@ -88,6 +88,11 @@ class ClaudeCodeLM(BaseLM):
     async def generate(
         self, messages: List[Dict[str, str]]
     ) -> Tuple[str, int, int]:
+        # Cost ceiling: return empty before spawning a subprocess once we've
+        # hit the per-run cap (spec 2026-04-27 §9).
+        if self._invocations_used >= self._max_invocations_per_run:
+            return "", 0, 0
+
         prompt = _serialize_messages(messages)
         cwd = self._cwd_provider()
         # `run_cc` is synchronous (subprocess.run); offload to a thread so we
