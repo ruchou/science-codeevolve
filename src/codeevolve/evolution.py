@@ -26,6 +26,7 @@ from codeevolve.evaluator import Evaluator
 from codeevolve.islands.graph import IslandCommunicationData
 from codeevolve.islands.migration import sync_migrate
 from codeevolve.islands.sync import GlobalSyncData
+from codeevolve.lm.base import BaseEnsemble
 from codeevolve.lm.openai import OpenAIEmbedding, OpenAIEnsemble
 from codeevolve.prompt.sampler import PromptSampler, format_prog_msg
 from codeevolve.prompt.template import format_eval_budget
@@ -1231,7 +1232,7 @@ def _create_ensembles(
     evolve_config: Dict[str, Any],
     args: Dict[str, Any],
     logger: logging.Logger,
-) -> Tuple[OpenAIEnsemble, OpenAIEnsemble]:
+) -> Tuple["BaseEnsemble", "BaseEnsemble"]:
     """Creates and configures the exploration and exploitation LLM ensembles.
 
     Args:
@@ -1242,8 +1243,36 @@ def _create_ensembles(
 
     Returns:
         Tuple of (exploration_ensemble, exploitation_ensemble).
+        When ``evolve_config["EA_STRATEGY"] == "claude_code"``, both are
+        ``SingleModelEnsemble(ClaudeCodeLM(...))``.  Otherwise the existing
+        ``OpenAIEnsemble`` path is used.
     """
     evolve_start_marker, evolve_end_marker, _, _ = _get_markers(evolve_config)
+
+    ea_strategy = (evolve_config.get("EA_STRATEGY") or "default").lower()
+    if ea_strategy == "claude_code":
+        from pathlib import Path as _Path
+
+        from codeevolve.lm.claude_code import ClaudeCodeLM
+        from codeevolve.lm.single_model_ensemble import SingleModelEnsemble
+
+        def _make_cc_ensemble() -> SingleModelEnsemble:
+            lm = ClaudeCodeLM(
+                claude_bin=evolve_config.get("CLAUDE_CODE_BIN", "claude"),
+                permission_mode=evolve_config.get(
+                    "CLAUDE_CODE_PERMISSION_MODE", "bypassPermissions"
+                ),
+                per_invocation_timeout_s=float(
+                    evolve_config.get("CLAUDE_CODE_PER_INVOCATION_TIMEOUT_S", 600.0)
+                ),
+                max_invocations_per_run=int(
+                    evolve_config.get("CLAUDE_CODE_MAX_INVOCATIONS", 200)
+                ),
+                cwd_provider=lambda: _Path.cwd(),
+            )
+            return SingleModelEnsemble(lm, logger=logger)
+
+        return _make_cc_ensemble(), _make_cc_ensemble()
 
     exploration_ensemble: OpenAIEnsemble = OpenAIEnsemble(
         models_cfg=config.get("EXPLORATION_ENSEMBLE", config.get("ENSEMBLE")),
