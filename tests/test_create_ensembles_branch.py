@@ -79,3 +79,13 @@ def test_create_ensembles_claude_code_returns_single_model_ensemble():
     # The wrapped model is a ClaudeCodeLM — verify by name attribute.
     assert explore.select_model().name == "claude_code"
     assert exploit.select_model().name == "claude_code"
+
+
+def test_create_ensembles_claude_code_shares_single_lm_across_ensembles():
+    """Spec §9: cost ceiling is per-run, not per-ensemble. Both
+    SingleModelEnsembles must reference the same ClaudeCodeLM instance."""
+    config, evolve_config = _minimal_config_claude_code_strategy()
+    explore, exploit = _create_ensembles(
+        config, evolve_config, _minimal_args(), logging.getLogger("test")
+    )
+    assert explore.select_model() is exploit.select_model()

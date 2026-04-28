@@ -127,3 +127,31 @@ async def test_generate_cost_ceiling_does_not_run_binary_when_exhausted(cwd_prov
     # Subsequent calls also short-circuit.
     text2, _, _ = await lm.generate([{"role": "user", "content": "x"}])
     assert text2 == ""
+
+
+def test_class_has_model_name_attribute():
+    """Regression guard: codeevolve evolution.py reads ensemble.models[i].model_name
+    in evolve_state telemetry. ClaudeCodeLM must expose this attribute."""
+    assert hasattr(ClaudeCodeLM, "model_name")
+    assert isinstance(ClaudeCodeLM.model_name, str)
+    assert ClaudeCodeLM.model_name  # not empty
+
+
+@pytest.mark.asyncio
+async def test_cost_ceiling_logs_warning_once(cwd_provider, caplog):
+    import logging as _logging
+    lm = ClaudeCodeLM(
+        claude_bin=str(FIXTURES / "fake_claude_happy_a.sh"),
+        per_invocation_timeout_s=5.0,
+        max_invocations_per_run=1,
+        cwd_provider=cwd_provider,
+    )
+    # First call succeeds; second hits ceiling and logs.
+    await lm.generate([{"role": "user", "content": "x"}])
+    with caplog.at_level(_logging.WARNING):
+        await lm.generate([{"role": "user", "content": "x"}])
+        await lm.generate([{"role": "user", "content": "x"}])
+    warnings = [r for r in caplog.records if r.levelno == _logging.WARNING]
+    # Should log once, not twice.
+    assert len(warnings) == 1
+    assert "cost ceiling" in warnings[0].message.lower()

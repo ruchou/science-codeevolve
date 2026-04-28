@@ -1256,23 +1256,26 @@ def _create_ensembles(
         from codeevolve.lm.claude_code import ClaudeCodeLM
         from codeevolve.lm.single_model_ensemble import SingleModelEnsemble
 
-        def _make_cc_ensemble() -> SingleModelEnsemble:
-            lm = ClaudeCodeLM(
-                claude_bin=evolve_config.get("CLAUDE_CODE_BIN", "claude"),
-                permission_mode=evolve_config.get(
-                    "CLAUDE_CODE_PERMISSION_MODE", "bypassPermissions"
-                ),
-                per_invocation_timeout_s=float(
-                    evolve_config.get("CLAUDE_CODE_PER_INVOCATION_TIMEOUT_S", 600.0)
-                ),
-                max_invocations_per_run=int(
-                    evolve_config.get("CLAUDE_CODE_MAX_INVOCATIONS", 200)
-                ),
-                cwd_provider=lambda: _Path.cwd(),
-            )
-            return SingleModelEnsemble(lm, logger=logger)
-
-        return _make_cc_ensemble(), _make_cc_ensemble()
+        # Single ClaudeCodeLM shared across exploration + exploitation so the
+        # cost ceiling is enforced per run, not per ensemble (spec §9 intent).
+        cc_lm = ClaudeCodeLM(
+            claude_bin=evolve_config.get("CLAUDE_CODE_BIN", "claude"),
+            permission_mode=evolve_config.get(
+                "CLAUDE_CODE_PERMISSION_MODE", "bypassPermissions"
+            ),
+            per_invocation_timeout_s=float(
+                evolve_config.get("CLAUDE_CODE_PER_INVOCATION_TIMEOUT_S", 600.0)
+            ),
+            max_invocations_per_run=int(
+                evolve_config.get("CLAUDE_CODE_MAX_INVOCATIONS", 200)
+            ),
+            cwd_provider=lambda: _Path.cwd(),
+            logger=logger,
+        )
+        return (
+            SingleModelEnsemble(cc_lm, logger=logger),
+            SingleModelEnsemble(cc_lm, logger=logger),
+        )
 
     exploration_ensemble: OpenAIEnsemble = OpenAIEnsemble(
         models_cfg=config.get("EXPLORATION_ENSEMBLE", config.get("ENSEMBLE")),

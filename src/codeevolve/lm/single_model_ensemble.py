@@ -1,3 +1,14 @@
+# ===--------------------------------------------------------------------------------------===#
+#
+# Part of the CodeEvolve Project, under the Apache License v2.0.
+# See https://github.com/inter-co/science-codeevolve/blob/main/LICENSE for license information.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ===--------------------------------------------------------------------------------------===#
+#
+# This file implements a minimal single-model ensemble wrapper.
+#
+# ===--------------------------------------------------------------------------------------===#
 """SingleModelEnsemble — minimal BaseEnsemble wrapping a single LM.
 
 Used for the --ea-strategy claude_code path so the rest of evolution.py

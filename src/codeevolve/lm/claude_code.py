@@ -1,11 +1,23 @@
+# ===--------------------------------------------------------------------------------------===#
+#
+# Part of the CodeEvolve Project, under the Apache License v2.0.
+# See https://github.com/inter-co/science-codeevolve/blob/main/LICENSE for license information.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ===--------------------------------------------------------------------------------------===#
+#
+# This file implements the ClaudeCodeLM wrapper for `claude --print` subprocess invocations.
+#
+# ===--------------------------------------------------------------------------------------===#
 """ClaudeCodeLM — BaseLM that wraps `claude --print` subprocess invocations
 for the --ea-strategy claude_code path (spec 2026-04-27)."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 # The runner package lives outside codeevolve; add memacc-llm/ to sys.path
 # at import time. This is the same trick the rest of memacc-llm uses to
@@ -52,6 +64,7 @@ class ClaudeCodeLM(BaseLM):
     """
 
     name: str = "claude_code"
+    model_name: str = "claude_code"  # used by evolution.py evolve_state telemetry
     weight: float = 1.0  # only model in the pool, weight ignored
 
     def __init__(
@@ -62,6 +75,7 @@ class ClaudeCodeLM(BaseLM):
         per_invocation_timeout_s: float = 600.0,
         max_invocations_per_run: int = 200,
         cwd_provider: Callable[[], Path],
+        logger: Optional[logging.Logger] = None,
     ):
         # Spec §10: raise immediately at construction if `claude` is not
         # resolvable. Catches the common config error of enabling
@@ -84,20 +98,38 @@ class ClaudeCodeLM(BaseLM):
         self._max_invocations_per_run = max_invocations_per_run
         self._cwd_provider = cwd_provider
         self._invocations_used = 0
+        self._logger = logger if logger is not None else logging.getLogger(__name__)
+        self._warned_ceiling: bool = False
 
     async def generate(
         self, messages: List[Dict[str, str]]
     ) -> Tuple[str, int, int]:
+        """Run one `claude --print` subprocess. Return (text, prompt_tokens,
+        completion_tokens) per the BaseLM contract.
+
+        Token counts are returned as 0 because `claude --print` does not
+        expose them. On any non-"emitted" status (timeout, subprocess error,
+        or post-cost-ceiling), returns ("", 0, 0); the ensemble caller
+        treats empty text as a generation failure, same path as a
+        free-tier 429.
+        """
         # Cost ceiling: return empty before spawning a subprocess once we've
         # hit the per-run cap (spec 2026-04-27 §9).
         if self._invocations_used >= self._max_invocations_per_run:
+            if not self._warned_ceiling:
+                self._logger.warning(
+                    "ClaudeCodeLM cost ceiling reached after %d invocations; "
+                    "subsequent generate() calls will short-circuit (spec §9.4).",
+                    self._max_invocations_per_run,
+                )
+                self._warned_ceiling = True
             return "", 0, 0
 
         prompt = _serialize_messages(messages)
         cwd = self._cwd_provider()
         # `run_cc` is synchronous (subprocess.run); offload to a thread so we
         # don't block the asyncio loop while `claude` is computing.
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: run_cc(
